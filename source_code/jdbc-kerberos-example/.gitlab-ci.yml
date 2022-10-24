@@ -1,0 +1,53 @@
+default:
+  image: ${CI_REGISTRY}/athemaster/devops/template/ci/maven:3.3.9-jdk-8
+  tags:
+    - "kubernetes"
+
+stages:
+  - build
+  - test
+
+variables:
+  MAVEN_CLI_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository --batch-mode --errors --fail-at-end --show-version -DinstallAtEnd=true -DdeployAtEnd=true -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=WARN -Dorg.slf4j.simpleLogger.showDateTime=true -Djava.awt.headless=true"
+
+cache:
+  paths:
+    - .m2/repository
+
+package:
+  stage: build
+  script:
+    - mvn $MAVEN_CLI_OPTS package -Dmaven.test.skip
+
+unittest:
+  stage: test
+  image: ${CI_REGISTRY}/athemaster/devops/template/ci/maven:3.3.9-jdk-8
+  script:
+    - mvn $MAVEN_CLI_OPTS test
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - target/surefire-reports/TEST-*.xml
+        - target/failsafe-reports/TEST-*.xml
+    paths:
+      - target/jacoco.exec
+      - target/site/jacoco/jacoco.xml
+
+
+sonarqube-check:
+  stage: test
+  image: ${CI_REGISTRY}/athemaster/devops/template/ci/sonar-java:8_11
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"  # Defines the location of the analysis task cache
+    GIT_DEPTH: "0"
+  script:
+    - export JAVA_HOME=/usr/local/openjdk-8 && mvn -Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository clean verify
+    - export JAVA_HOME=/usr/local/openjdk-11 && mvn sonar:sonar -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.login=${SONAR_TOKEN} -Dsonar.projectKey=${CI_PROJECT_NAME}
+  needs:
+    - "package"
+    - "unittest"
+  only:
+    - main
+    - /[0-9]+(?:.[0-9]+)+-dev$/ # regular expression
+    - /[0-9]+(?:.[0-9]+)+-release$/ # regular expression
